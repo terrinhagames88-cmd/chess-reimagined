@@ -1,0 +1,782 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Xadrez vs Bot</title>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+
+<style>
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    min-height: 100vh;
+
+    display: flex;
+    justify-content: center;
+    align-items: center;
+
+    background: #181818;
+    color: white;
+
+    font-family: Arial, sans-serif;
+}
+
+.container {
+    display: flex;
+    gap: 30px;
+    align-items: center;
+}
+
+#board {
+    width: min(80vw, 600px);
+    height: min(80vw, 600px);
+
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    grid-template-rows: repeat(8, 1fr);
+
+    border: 5px solid #111;
+    box-shadow: 0 10px 30px #0008;
+}
+
+.square {
+    position: relative;
+
+    display: flex;
+    justify-content: center;
+    align-items: center;
+
+    font-size: clamp(30px, 7vw, 60px);
+
+    cursor: pointer;
+
+    user-select: none;
+}
+
+.light {
+    background: #f0d9b5;
+}
+
+.dark {
+    background: #b58863;
+}
+
+.selected {
+    box-shadow: inset 0 0 0 5px #4caf50;
+}
+
+.possible::after {
+    content: "";
+
+    width: 25%;
+    height: 25%;
+
+    border-radius: 50%;
+
+    background: #0005;
+
+    position: absolute;
+}
+
+.capture::after {
+    content: "";
+
+    width: 75%;
+    height: 75%;
+
+    border-radius: 50%;
+
+    border: 5px solid #d33;
+
+    position: absolute;
+}
+
+.check {
+    background: #d44 !important;
+}
+
+.panel {
+    width: 230px;
+
+    background: #222;
+    padding: 20px;
+
+    border-radius: 12px;
+
+    box-shadow: 0 10px 30px #0006;
+}
+
+h1 {
+    margin-top: 0;
+}
+
+#status {
+    min-height: 50px;
+
+    margin: 20px 0;
+
+    font-size: 18px;
+}
+
+button {
+    width: 100%;
+
+    padding: 12px;
+
+    border: none;
+    border-radius: 8px;
+
+    background: #4caf50;
+    color: white;
+
+    font-size: 16px;
+
+    cursor: pointer;
+}
+
+button:hover {
+    background: #43a047;
+}
+
+#moves {
+    margin-top: 20px;
+
+    max-height: 200px;
+    overflow-y: auto;
+
+    font-family: monospace;
+    font-size: 13px;
+}
+
+@media(max-width: 850px) {
+
+    .container {
+        flex-direction: column;
+    }
+
+    .panel {
+        width: min(80vw, 600px);
+    }
+
+}
+
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+    <div id="board"></div>
+
+    <div class="panel">
+
+        <h1>♟ Xadrez</h1>
+
+        <div id="status">
+            Seu turno
+        </div>
+
+        <button onclick="newGame()">
+            Novo jogo
+        </button>
+
+        <div id="moves"></div>
+
+    </div>
+
+</div>
+
+
+<script>
+
+const board = document.getElementById("board");
+const statusText = document.getElementById("status");
+const movesText = document.getElementById("moves");
+
+let game = new Chess();
+
+let selectedSquare = null;
+let possibleMoves = [];
+
+let botThinking = false;
+
+
+// ======================================================
+// PEÇAS
+// ======================================================
+
+const pieces = {
+
+    w: {
+        p: "♙",
+        r: "♖",
+        n: "♘",
+        b: "♗",
+        q: "♕",
+        k: "♔"
+    },
+
+    b: {
+        p: "♟",
+        r: "♜",
+        n: "♞",
+        b: "♝",
+        q: "♛",
+        k: "♚"
+    }
+
+};
+
+
+// ======================================================
+// DESENHAR TABULEIRO
+// ======================================================
+
+function drawBoard() {
+
+    board.innerHTML = "";
+
+    const boardState = game.board();
+
+    for (let row = 0; row < 8; row++) {
+
+        for (let col = 0; col < 8; col++) {
+
+            const squareName =
+                String.fromCharCode(97 + col) +
+                (8 - row);
+
+            const square = document.createElement("div");
+
+            square.classList.add("square");
+
+            if ((row + col) % 2 === 0) {
+
+                square.classList.add("light");
+
+            } else {
+
+                square.classList.add("dark");
+
+            }
+
+
+            // peça
+            const piece = boardState[row][col];
+
+            if (piece) {
+
+                square.textContent =
+                    pieces[piece.color][piece.type];
+
+            }
+
+
+            // seleção
+            if (selectedSquare === squareName) {
+
+                square.classList.add("selected");
+
+            }
+
+
+            // movimentos possíveis
+            if (possibleMoves.includes(squareName)) {
+
+                if (piece) {
+
+                    square.classList.add("capture");
+
+                } else {
+
+                    square.classList.add("possible");
+
+                }
+
+            }
+
+
+            // rei em xeque
+            if (piece &&
+                piece.type === "k" &&
+                game.in_check() &&
+                piece.color === game.turn()) {
+
+                square.classList.add("check");
+
+            }
+
+
+            square.addEventListener(
+                "click",
+                () => clickSquare(squareName)
+            );
+
+
+            board.appendChild(square);
+
+        }
+
+    }
+
+}
+
+
+// ======================================================
+// CLIQUE
+// ======================================================
+
+function clickSquare(square) {
+
+    // não deixa jogar enquanto o bot pensa
+    if (botThinking) return;
+
+    // só jogador branco
+    if (game.turn() !== "w") return;
+
+
+    // se nenhuma peça foi selecionada
+    if (!selectedSquare) {
+
+        const piece = game.get(square);
+
+        if (!piece) return;
+
+        if (piece.color !== "w") return;
+
+        selectedSquare = square;
+
+        possibleMoves =
+            game.moves({
+                square: square,
+                verbose: true
+            }).map(move => move.to);
+
+        drawBoard();
+
+        return;
+    }
+
+
+    // clicar novamente na mesma peça
+    if (square === selectedSquare) {
+
+        selectedSquare = null;
+        possibleMoves = [];
+
+        drawBoard();
+
+        return;
+    }
+
+
+    // verificar se é movimento legal
+    if (!possibleMoves.includes(square)) {
+
+        // talvez o jogador tenha clicado em outra peça
+        const piece = game.get(square);
+
+        if (piece && piece.color === "w") {
+
+            selectedSquare = square;
+
+            possibleMoves =
+                game.moves({
+                    square: square,
+                    verbose: true
+                }).map(move => move.to);
+
+            drawBoard();
+
+            return;
+        }
+
+        return;
+    }
+
+
+    // ==================================================
+    // MOVIMENTO
+    // ==================================================
+
+    const piece = game.get(selectedSquare);
+
+    let promotion = "q";
+
+
+    // promoção automática para dama
+    if (
+        piece &&
+        piece.type === "p" &&
+        (square[1] === "8" || square[1] === "1")
+    ) {
+
+        promotion = "q";
+
+    }
+
+
+    const move = game.move({
+
+        from: selectedSquare,
+        to: square,
+        promotion: promotion
+
+    });
+
+
+    // chess.js só aceita movimento legal
+    if (!move) {
+
+        return;
+
+    }
+
+
+    selectedSquare = null;
+    possibleMoves = [];
+
+    updateGame();
+
+}
+
+
+// ======================================================
+// ESTADO DO JOGO
+// ======================================================
+
+function updateGame() {
+
+    drawBoard();
+
+    updateStatus();
+
+    updateMoves();
+
+
+    if (game.game_over()) {
+
+        return;
+
+    }
+
+
+    // bot joga com as pretas
+    if (game.turn() === "b") {
+
+        botMove();
+
+    }
+
+}
+
+
+// ======================================================
+// STATUS
+// ======================================================
+
+function updateStatus() {
+
+    if (game.in_checkmate()) {
+
+        if (game.turn() === "w") {
+
+            statusText.textContent =
+                "Xeque-mate! O bot venceu. 🤖";
+
+        } else {
+
+            statusText.textContent =
+                "XEQUE-MATE! Você venceu! 🎉";
+
+        }
+
+        return;
+    }
+
+
+    if (game.in_stalemate()) {
+
+        statusText.textContent =
+            "Empate por afogamento.";
+
+        return;
+
+    }
+
+
+    if (game.insufficient_material()) {
+
+        statusText.textContent =
+            "Empate por material insuficiente.";
+
+        return;
+
+    }
+
+
+    if (game.in_threefold_repetition()) {
+
+        statusText.textContent =
+            "Empate por repetição.";
+
+        return;
+
+    }
+
+
+    if (game.turn() === "w") {
+
+        if (game.in_check()) {
+
+            statusText.textContent =
+                "⚠️ XEQUE! Seu turno.";
+
+        } else {
+
+            statusText.textContent =
+                "Seu turno.";
+
+        }
+
+    } else {
+
+        statusText.textContent =
+            botThinking
+            ? "🤖 Bot pensando..."
+            : "Turno do bot.";
+
+    }
+
+}
+
+
+// ======================================================
+// HISTÓRICO
+// ======================================================
+
+function updateMoves() {
+
+    const history = game.history();
+
+    let html = "";
+
+    for (let i = 0; i < history.length; i += 2) {
+
+        html +=
+            `<div>
+                ${Math.floor(i / 2) + 1}.
+                ${history[i] || ""}
+                ${history[i + 1] || ""}
+            </div>`;
+
+    }
+
+    movesText.innerHTML = html;
+
+    movesText.scrollTop =
+        movesText.scrollHeight;
+
+}
+
+
+// ======================================================
+// STOCKFISH
+// ======================================================
+
+let engine = null;
+
+function createEngine() {
+
+    /*
+        Stockfish 18 Lite Single Threaded
+
+        O arquivo principal cria um Worker.
+    */
+
+    engine = new Worker(
+        "https://cdn.jsdelivr.net/npm/stockfish@18.0.8/bin/stockfish-18-lite-single.js"
+    );
+
+
+    engine.postMessage("uci");
+
+    engine.postMessage(
+        "setoption name Skill Level value 15"
+    );
+
+    engine.postMessage("isready");
+
+}
+
+
+createEngine();
+
+
+// ======================================================
+// MOVIMENTO DO BOT
+// ======================================================
+
+function botMove() {
+
+    botThinking = true;
+
+    updateStatus();
+
+
+    // posição atual
+    const fen = game.fen();
+
+
+    engine.onmessage = function(event) {
+
+        const message = event.data;
+
+
+        if (
+            typeof message === "string" &&
+            message.startsWith("bestmove")
+        ) {
+
+            const parts =
+                message.split(" ");
+
+            const bestMove = parts[1];
+
+
+            if (!bestMove || bestMove === "(none)") {
+
+                botThinking = false;
+
+                updateStatus();
+
+                return;
+
+            }
+
+
+            const from =
+                bestMove.substring(0, 2);
+
+            const to =
+                bestMove.substring(2, 4);
+
+            const promotion =
+                bestMove.length >= 5
+                ? bestMove.substring(4, 5)
+                : undefined;
+
+
+            /*
+                IMPORTANTE:
+
+                O Stockfish sugere o movimento,
+                mas quem realmente executa o movimento
+                é o chess.js.
+
+                Portanto, mesmo que algo dê errado
+                com o motor, movimentos ilegais não
+                entram no jogo.
+            */
+
+            const move = game.move({
+
+                from: from,
+
+                to: to,
+
+                promotion: promotion || "q"
+
+            });
+
+
+            botThinking = false;
+
+
+            if (!move) {
+
+                console.error(
+                    "Stockfish retornou movimento inválido:",
+                    bestMove
+                );
+
+                updateStatus();
+
+                return;
+
+            }
+
+
+            updateGame();
+
+        }
+
+    };
+
+
+    engine.postMessage(
+        "position fen " + fen
+    );
+
+
+    /*
+        Quanto maior o depth,
+        mais forte e mais lento fica.
+
+        15 é um bom equilíbrio.
+    */
+
+    engine.postMessage(
+        "go depth 15"
+    );
+
+}
+
+
+// ======================================================
+// NOVO JOGO
+// ======================================================
+
+function newGame() {
+
+    game = new Chess();
+
+    selectedSquare = null;
+
+    possibleMoves = [];
+
+    botThinking = false;
+
+    engine.postMessage("stop");
+
+    drawBoard();
+
+    updateStatus();
+
+    updateMoves();
+
+}
+
+
+// ======================================================
+// INICIAR
+// ======================================================
+
+drawBoard();
+
+updateStatus();
+
+updateMoves();
+
+</script>
+
+</body>
+</html>
